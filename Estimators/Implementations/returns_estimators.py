@@ -12,6 +12,8 @@ class ReturnsEstimators:
         """
         Initialize
         """
+        
+        print("Hello World!")
 
 
         pass
