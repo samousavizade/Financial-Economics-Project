@@ -1,4 +1,6 @@
 # pylint: disable=missing-module-docstring
+from ast import Return
+import imp
 import warnings
 import numpy as np
 import pandas as pd
@@ -7,8 +9,9 @@ from sklearn.covariance import MinCovDet, EmpiricalCovariance, ShrunkCovariance,
 from scipy.optimize import minimize
 from scipy.cluster.hierarchy import average, complete, single, dendrogram
 from matplotlib import pyplot as plt
-from mlfinlab.portfolio_optimization.estimators.returns_estimators import ReturnsEstimators
 
+# from mlfinlab.portfolio_optimization.estimators.returns_estimators import ReturnsEstimators
+from returns_estimators import ReturnsEstimators
 
 class RiskEstimators:
     """
@@ -24,10 +27,78 @@ class RiskEstimators:
         """
 
         pass
+    
+    
+    def _is_positive_semidefinite(matrix):
+        """
+        Helper function to check if a given matrix is positive semidefinite.
+        Any method that requires inverting the covariance matrix will struggle
+        with a non-positive semidefinite matrix
+
+        :param matrix: (covariance) matrix to test
+        :type matrix: np.ndarray, pd.DataFrame
+        :return: whether matrix is positive semidefinite
+        :rtype: bool
+        """
+        try:
+            # Significantly more efficient than checking eigenvalues (stackoverflow.com/questions/16266720)
+            np.linalg.cholesky(matrix + 1e-16 * np.eye(len(matrix)))
+            return True
+        except np.linalg.LinAlgError:
+            return False
+
+
+    def fix_nonpositive_semidefinite(matrix, fix_method="spectral"):
+        """
+        Check if a covariance matrix is positive semidefinite, and if not, fix it
+        with the chosen method.
+
+        The ``spectral`` method sets negative eigenvalues to zero then rebuilds the matrix,
+        while the ``diag`` method adds a small positive value to the diagonal.
+
+        :param matrix: raw covariance matrix (may not be PSD)
+        :type matrix: pd.DataFrame
+        :param fix_method: {"spectral", "diag"}, defaults to "spectral"
+        :type fix_method: str, optional
+        :raises NotImplementedError: if a method is passed that isn't implemented
+        :return: positive semidefinite covariance matrix
+        :rtype: pd.DataFrame
+        """
+        if RiskEstimators._is_positive_semidefinite(matrix):
+            return matrix
+
+        warnings.warn(
+            "The covariance matrix is non positive semidefinite. Amending eigenvalues."
+        )
+
+        # Eigendecomposition
+        q, V = np.linalg.eigh(matrix)
+
+        if fix_method == "spectral":
+            # Remove negative eigenvalues
+            q = np.where(q > 0, q, 0)
+            # Reconstruct matrix
+            fixed_matrix = V @ np.diag(q) @ V.T
+        elif fix_method == "diag":
+            min_eig = np.min(q)
+            fixed_matrix = matrix - 1.1 * min_eig * np.eye(len(matrix))
+        else:
+            raise NotImplementedError("Method {} not implemented".format(fix_method))
+
+        if not RiskEstimators._is_positive_semidefinite(fixed_matrix):  # pragma: no cover
+            warnings.warn(
+                "Could not fix matrix. Please try a different risk model.", UserWarning
+            )
+
+        # Rebuild labels if provided
+        if isinstance(matrix, pd.DataFrame):
+            tickers = matrix.index
+            return pd.DataFrame(fixed_matrix, index=tickers, columns=tickers)
+        else:
+            return fixed_matrix
 
     @staticmethod
-    def minimum_covariance_determinant(returns, price_data=False, assume_centered=False,
-                                       support_fraction=None, random_state=None):
+    def minimum_covariance_determinant(self, returns, price_data=False, assume_centered=False, support_fraction=None, random_state=None):
         """
         Calculates the Minimum Covariance Determinant for a dataframe of asset prices or returns.
 
@@ -55,7 +126,30 @@ class RiskEstimators:
         :return: (np.array) Estimated robust covariance matrix.
         """
 
-        pass
+        if not isinstance(price_data, pd.DataFrame):
+            warnings.warn("data is not in a dataframe", RuntimeWarning)
+            prices = pd.DataFrame(prices)
+
+        # Extra dependency
+        try:
+            from sklearn.covariance import fast_mcd
+        except (ModuleNotFoundError, ImportError):
+            raise ImportError("Please install scikit-learn via pip or poetry")
+
+        assets = prices.columns
+
+        if price_data:
+            X = ReturnsEstimators().calculate_returns(prices)
+        else:
+            X = prices
+
+        X = X.dropna().values
+        raw_cov_array = fast_mcd(X, random_state=random_state)[1]
+        cov = pd.DataFrame(raw_cov_array, index=assets, columns=assets) * frequency
+        return RiskEstimators.fix_nonpositive_semidefinite(cov, kwargs.get("fix_method", "spectral"))
+    
+    
+    
 
     @staticmethod
     def empirical_covariance(returns, price_data=False, assume_centered=False):

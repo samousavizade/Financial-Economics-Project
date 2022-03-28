@@ -28,8 +28,8 @@ class ReturnsEstimators:
         """
 
         if not isinstance(asset_prices, pd.DataFrame):
-                warnings.warn("prices are not in a dataframe", RuntimeWarning)
-                asset_prices = pd.DataFrame(asset_prices)
+            warnings.warn("prices are not in a dataframe", RuntimeWarning)
+            asset_prices = pd.DataFrame(asset_prices)
         
         returns = ReturnsEstimators().calculate_returns(asset_prices, resample_by)
 
@@ -49,8 +49,8 @@ class ReturnsEstimators:
         """
 
         if not isinstance(asset_prices, pd.DataFrame):
-                warnings.warn("prices are not in a dataframe", RuntimeWarning)
-                asset_prices = pd.DataFrame(asset_prices)
+            warnings.warn("prices are not in a dataframe", RuntimeWarning)
+            asset_prices = pd.DataFrame(asset_prices)
         
         returns = ReturnsEstimators().calculate_returns(asset_prices, resample_by)
 
