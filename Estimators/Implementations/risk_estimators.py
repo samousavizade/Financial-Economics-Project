@@ -98,7 +98,10 @@ class RiskEstimators:
             return fixed_matrix
 
     @staticmethod
-    def minimum_covariance_determinant(self, returns, price_data=False, assume_centered=False, support_fraction=None, random_state=None):
+    def minimum_covariance_determinant(self, returns,
+                                       price_data=False, assume_centered=False, 
+                                       support_fraction=None, random_state=None,
+                                       nonpositive_semidefinite_fix_method='spectral'):
         """
         Calculates the Minimum Covariance Determinant for a dataframe of asset prices or returns.
 
@@ -130,23 +133,18 @@ class RiskEstimators:
             warnings.warn("data is not in a dataframe", RuntimeWarning)
             prices = pd.DataFrame(prices)
 
-        # Extra dependency
-        try:
-            from sklearn.covariance import fast_mcd
-        except (ModuleNotFoundError, ImportError):
-            raise ImportError("Please install scikit-learn via pip or poetry")
-
         assets = prices.columns
 
         if price_data:
-            X = ReturnsEstimators().calculate_returns(prices)
+            X = ReturnsEstimators.calculate_returns(prices)
         else:
             X = prices
 
         X = X.dropna().values
-        raw_cov_array = fast_mcd(X, random_state=random_state)[1]
-        cov = pd.DataFrame(raw_cov_array, index=assets, columns=assets) * frequency
-        return RiskEstimators.fix_nonpositive_semidefinite(cov, kwargs.get("fix_method", "spectral"))
+        cov_model = MinCovDet(random_state=random_state).fit(X)
+        covariance = pd.DataFrame(cov_model.covariance_, index=assets, columns=assets) 
+        return RiskEstimators.fix_nonpositive_semidefinite(covariance, 
+                                                           nonpositive_semidefinite_fix_method)
     
     
     
