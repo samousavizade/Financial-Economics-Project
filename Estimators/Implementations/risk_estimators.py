@@ -2,7 +2,9 @@
 from ast import Return
 import imp
 from operator import index
+from re import S
 import warnings
+from cv2 import eigen
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import KernelDensity
@@ -14,7 +16,6 @@ from torch import le
 
 # from mlfinlab.portfolio_optimization.estimators.returns_estimators import ReturnsEstimators
 from returns_estimators import ReturnsEstimators
-
 
 class RiskEstimators:
     """
@@ -292,7 +293,7 @@ class RiskEstimators:
         """
 
         pass
-
+    
     def denoise_covariance(self, cov, tn_relation, denoise_method='const_resid_eigen', detone=False,
                            market_component=1, kde_bwidth=0.01, alpha=0):
         """
@@ -356,8 +357,44 @@ class RiskEstimators:
                               Targeted Shrinkage Method. (0 by default)
         :return: (np.array) De-noised covariance matrix or correlation matrix.
         """
+        
+        corr = self.cov_to_corr(cov)
+        std = np.diag(cov) ** 0.5
+        
+        e_values, e_vectors = self._get_pca(corr)
+        
+        # TODO: var didnt used???
+        e_max, var = self._find_max_eval(np.diag(e_values), tn_relation, kde_bwidth)
+        num_facts = e_values.shape[0] - np.diag(e_values)[:,:,-1].searchsorted(e_max)
+        
+        if denoise_method == "const_resid_eigen":
+            # missing parameter 
+            denoised_corr = self._denoised_corr_const_resid_eigen(e_values, e_vectors, num_facts)
+            
+        elif denoise_method == "spectral":
+            denoised_corr = self._denoised_corr_spectral(e_values, e_vectors, num_facts)
+                        
+        elif denoise_method == "target_shrink":
+            denoised_corr = self._denoised_corr_targ_shrink(e_values, e_vectors, num_facts, alpha)
+    
+        else:
+            raise DenoiseMethodNotFound("Denoise method not found!")
+        
+        if detone:
+            e_values, e_vectors = self._get_pca(corr)
+        
+            e_values_ = e_values[:market_component, :market_component]
+            e_vectors_ = e_vectors[:, :market_component]
+            
+            # TODO: dot to @
+            corr_ = np.dot(e_vectors_, e_values_).dot(e_vectors_)
+            detoned_corr = denoised_corr - corr_
+            
+            return RiskEstimators.corr_to_cov(detoned_corr, std)
+        
+        else:    
+            return RiskEstimators.corr_to_cov(denoised_corr, std)
 
-        pass
 
     @staticmethod
     def corr_to_cov(corr, std):
@@ -404,7 +441,6 @@ class RiskEstimators:
         """
 
         # We should compute the condition number of the matrix to see if it is invertible.
-
         return np.isfinite(np.linalg.cond(matrix))
 
     @staticmethod
@@ -544,7 +580,8 @@ class RiskEstimators:
         
         return e_values, e_vectors
 
-    def _denoised_corr(self, eigenvalues, eigenvectors, num_facts):
+    # function name changed to _denoised_corr_const_resid_eigen from _denoised_corr  
+    def _denoised_corr_const_resid_eigen(self, eigenvalues, eigenvectors, num_facts):
         """
         De-noises the correlation matrix using the Constant Residual Eigenvalue method.
 
@@ -562,11 +599,18 @@ class RiskEstimators:
         :param num_facts: (float) Threshold for eigenvalues to be fixed.
         :return: (np.array) De-noised correlation matrix.
         """
+        
+        e_values_ = np.diag(eigenvalues).copy()
+        e_values_[num_facts:] = e_values_[num_facts:].sum() / float(e_values_.shape[0] - num_facts)
+        e_values_ = np.diag(e_values_)
+        
+        # TODO: use @ instead of .dot method
+        cov_1 = np.dot(eigenvectors, e_values_).dot(eigenvectors.T)
+        corr_1 = RiskEstimators.cov_to_corr(cov_1)
 
-        pass
+        return corr_1 
 
-    @staticmethod
-    def _denoised_corr_targ_shrink(eigenvalues, eigenvectors, num_facts, alpha=0):
+    def _denoised_corr_targ_shrink(self, eigenvalues, eigenvectors, num_facts, alpha=0):
         """
         De-noises the correlation matrix using the Targeted Shrinkage method.
 
@@ -586,8 +630,16 @@ class RiskEstimators:
         :return: (np.array) De-noised correlation matrix.
         """
 
-        pass
+        e_values_L, e_vectors_L = eigenvalues[:num_facts, :num_facts], eigenvectors[:, :num_facts]
+        e_values_R, e_vectors_R = eigenvalues[num_facts:, num_facts:], eigenvectors[:, num_facts:]
+        
+        corr_0 = np.dot(e_vectors_L, e_values_L).dot(e_vectors_L.T)
+        corr_1 = np.dot(e_vectors_R, e_values_R).dot(e_vectors_R.T)
+        corr_2 = corr_0 + alpha * corr_1 + (1 - alpha) * np.diag(np.diag(corr_1))
+        
+        return corr_2
 
+    # this function isnt required. bad input arguments  
     def _detoned_corr(self, corr, market_component=1):
         """
         De-tones the correlation matrix by removing the market component.
@@ -600,9 +652,9 @@ class RiskEstimators:
         :param market_component: (int) Number of fist eigevectors related to a market component. (1 by default)
         :return: (np.array) De-toned correlation matrix.
         """
-
         pass
 
+    # kind argument added  
     def _denoised_corr_spectral(self, eigenvalues, eigenvectors, num_facts):
         """
         De-noises the correlation matrix using the Spectral method.
@@ -618,5 +670,20 @@ class RiskEstimators:
         :param num_facts: (float) Threshold for eigenvalues to be fixed.
         :return: (np.array) De-noised correlation matrix.
         """
-
-        pass
+        
+        e_values_ = np.diag(eigenvalues).copy()        
+        e_values_[num_facts:] = 0
+        
+        e_values_ = np.diag(e_values_)
+        
+        # TODO: use @ instead of .dot method
+        cov_1 = np.dot(eigenvectors, e_values_).dot(eigenvectors.T)
+        corr_1 = RiskEstimators.cov_to_corr(cov_1)
+        
+        return corr_1
+    
+class DenoiseMethodNotFound(Exception):
+    def __init__(self, message) -> None:
+        super().__init__(message)
+        
+    pass
