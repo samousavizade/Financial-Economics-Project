@@ -1,6 +1,7 @@
 # pylint: disable=missing-module-docstring
 from ast import Return
 import imp
+from operator import index
 import warnings
 import numpy as np
 import pandas as pd
@@ -9,9 +10,11 @@ from sklearn.covariance import MinCovDet, EmpiricalCovariance, ShrunkCovariance,
 from scipy.optimize import minimize
 from scipy.cluster.hierarchy import average, complete, single, dendrogram
 from matplotlib import pyplot as plt
+from torch import le
 
 # from mlfinlab.portfolio_optimization.estimators.returns_estimators import ReturnsEstimators
 from returns_estimators import ReturnsEstimators
+
 
 class RiskEstimators:
     """
@@ -27,8 +30,7 @@ class RiskEstimators:
         """
 
         pass
-    
-    
+
     def _is_positive_semidefinite(matrix):
         """
         Helper function to check if a given matrix is positive semidefinite.
@@ -46,7 +48,6 @@ class RiskEstimators:
             return True
         except np.linalg.LinAlgError:
             return False
-
 
     def fix_nonpositive_semidefinite(matrix, fix_method="spectral"):
         """
@@ -83,7 +84,8 @@ class RiskEstimators:
             min_eig = np.min(q)
             fixed_matrix = matrix - 1.1 * min_eig * np.eye(len(matrix))
         else:
-            raise NotImplementedError("Method {} not implemented".format(fix_method))
+            raise NotImplementedError(
+                "Method {} not implemented".format(fix_method))
 
         if not RiskEstimators._is_positive_semidefinite(fixed_matrix):  # pragma: no cover
             warnings.warn(
@@ -99,7 +101,7 @@ class RiskEstimators:
 
     @staticmethod
     def minimum_covariance_determinant(self, returns,
-                                       price_data=False, assume_centered=False, 
+                                       price_data=False, assume_centered=False,
                                        support_fraction=None, random_state=None,
                                        nonpositive_semidefinite_fix_method='spectral'):
         """
@@ -131,9 +133,9 @@ class RiskEstimators:
 
         if not isinstance(price_data, pd.DataFrame):
             warnings.warn("data is not in a dataframe", RuntimeWarning)
-            prices = pd.DataFrame(prices)
+            returns = pd.DataFrame(returns)
 
-        assets = prices.columns
+        assets = returns.columns
 
         if price_data:
             X = ReturnsEstimators.calculate_returns(returns)
@@ -142,12 +144,10 @@ class RiskEstimators:
 
         X = X.dropna().values
         cov_model = MinCovDet(random_state=random_state).fit(X)
-        covariance = pd.DataFrame(cov_model.covariance_, index=assets, columns=assets) 
-        return RiskEstimators.fix_nonpositive_semidefinite(covariance, 
+        covariance = pd.DataFrame(
+            cov_model.covariance_, index=assets, columns=assets)
+        return RiskEstimators.fix_nonpositive_semidefinite(covariance,
                                                            nonpositive_semidefinite_fix_method)
-    
-    
-    
 
     @staticmethod
     def empirical_covariance(returns, price_data=False, assume_centered=False,
@@ -186,14 +186,14 @@ class RiskEstimators:
             X = ReturnsEstimators.calculate_returns(returns)
         else:
             X = returns
-            
+
         X = X.dropna().values
-        
+
         cov_model = EmpiricalCovariance().fit(X)
-        covariance = pd.DataFrame(cov_model.covariance_, index=assets, columns=assets) 
-        return RiskEstimators.fix_nonpositive_semidefinite(covariance, 
+        covariance = pd.DataFrame(
+            cov_model.covariance_, index=assets, columns=assets)
+        return RiskEstimators.fix_nonpositive_semidefinite(covariance,
                                                            nonpositive_semidefinite_fix_method)
-    
 
     @staticmethod
     def shrinked_covariance(returns, price_data=False, shrinkage_type='basic', assume_centered=False,
@@ -284,7 +284,7 @@ class RiskEstimators:
         Second, it extracts and stores each cluster's filtered value (alpha) and assigns it to it's corresponding leaf.
         Finally, we create a new filtered matrix by assigning each of the correlations to their corresponding
         parent node's alpha value.
-        
+
         :param cor_matrix: (np.array) Numpy array of an empirical correlation matrix.
         :param method: (str) Hierarchical clustering method to use. (``complete`` by default, ``single``, ``average``)
         :param draw_plot: (bool) Plots the hierarchical cluster tree. (False by default)
@@ -374,7 +374,8 @@ class RiskEstimators:
         :return: (np.array) Covariance matrix.
         """
 
-        pass
+        cov = corr * np.outer(std, std)
+        return cov
 
     @staticmethod
     def cov_to_corr(cov):
@@ -387,7 +388,12 @@ class RiskEstimators:
         :return: (np.array) Covariance matrix.
         """
 
-        pass
+        std = np.sqrt(np.diag(cov))
+        corr = cov / np.outer(std, std)
+
+        # numerical error
+        corr[corr < -1], corr[corr > 1] = -1, +1
+        return corr
 
     @staticmethod
     def is_matrix_invertible(matrix):
@@ -397,7 +403,9 @@ class RiskEstimators:
         :return: (bool) Boolean value depending on whether the matrix is invertible or not.
         """
 
-        pass
+        # We should compute the condition number of the matrix to see if it is invertible.
+
+        return np.isfinite(np.linalg.cond(matrix))
 
     @staticmethod
     def _fit_kde(observations, kde_bwidth=0.01, kde_kernel='gaussian', eval_points=None):
@@ -417,7 +425,20 @@ class RiskEstimators:
         :return: (pd.Series) Series with estimated pdf values in the eval_points.
         """
 
-        pass
+        if len(observations) == 1:
+            observations = observations.reshape(-1, 1)
+
+        kde = KernelDensity(kernel=kde_kernel,
+                            bandwidth=kde_bwidth,).fit(observations)
+
+        if eval_points is None:
+            eval_points = np.unique(observations).reshape(-1, 1)
+
+        log_prob = kde.score_samples(eval_points)
+
+        pdf = pd.Series(np.exp(log_prob), index=eval_points.flatten())
+
+        return pdf
 
     @staticmethod
     def _mp_pdf(var, tn_relation, num_points):
@@ -434,7 +455,15 @@ class RiskEstimators:
         :return: (pd.Series) Series of M-P pdf values.
         """
 
-        pass
+        # tn_relation = T/N
+        q = tn_relation
+        
+        e_min, e_max = var * (1 - (1 / q) ** 0.5) ** 2, var * (1 + (1 / q) ** 0.5) ** 2
+        e_values = np.linspace(e_min, e_max, num_points)
+        
+        pdf = q / (2 * np.pi * var * e_values) * ((e_max - e_values) * (e_values - e_min)) ** 0.5
+        pdf = pd.Series(pdf, index=e_values)
+        return pdf
 
     def _pdf_fit(self, var, eigen_observations, tn_relation, kde_bwidth, num_points=1000):
         """
@@ -451,7 +480,18 @@ class RiskEstimators:
         :param num_points: (int) Number of points to estimate pdf. (for the empirical pdf, 1000 by default)
         :return: (float) SSE between empirical pdf and theoretical pdf.
         """
-        pass
+        
+        # 2.4
+        
+        # theoretical pdf
+        pdf_0 = RiskEstimators._mp_pdf(var, tn_relation, num_points)
+        
+        # emprical pdf
+        pdf_1 = RiskEstimators._fit_kde(eigen_observations, kde_bwidth, eval_points=pdf_0.index.values)
+        
+        sse = ((pdf_1 - pdf_0) ** 2).sum()
+        
+        return sse
 
     def _find_max_eval(self, eigen_observations, tn_relation, kde_bwidth):
         """
@@ -466,7 +506,23 @@ class RiskEstimators:
         :return: (float, float) Maximum random eigenvalue, optimal variation of the Marcenko-Pastur distribution.
         """
 
-        pass
+        out = minimize(lambda *x: self._pdf_fit(*x), 
+                       0.5,
+                       args=(eigen_observations, tn_relation, kde_bwidth),
+                       bounds=((1e-5, 1 - 1e-5), )
+                       )
+        
+        if out['success']:
+            var = out['x'][0]
+            
+        else:
+            var = 1
+            
+        q = tn_relation
+
+        e_max = var * (1 + (1 / q) ** 0.5) ** 2
+
+        return e_max, var
 
     @staticmethod
     def _get_pca(hermit_matrix):
@@ -480,8 +536,13 @@ class RiskEstimators:
         :param hermit_matrix: (np.array) Hermitian matrix.
         :return: (np.array, np.array) Eigenvalues matrix, eigenvectors array.
         """
-
-        pass
+        
+        e_values, e_vectors = np.linalg.eigh(hermit_matrix)
+        indices = e_values.argsort()[:,:,-1]
+        e_values, e_vectors = e_values[indices], e_vectors[:, indices]
+        e_values = np.diagflat(e_values)
+        
+        return e_values, e_vectors
 
     def _denoised_corr(self, eigenvalues, eigenvectors, num_facts):
         """
