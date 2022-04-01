@@ -136,9 +136,9 @@ class RiskEstimators:
         assets = prices.columns
 
         if price_data:
-            X = ReturnsEstimators.calculate_returns(prices)
+            X = ReturnsEstimators.calculate_returns(returns)
         else:
-            X = prices
+            X = returns
 
         X = X.dropna().values
         cov_model = MinCovDet(random_state=random_state).fit(X)
@@ -150,7 +150,8 @@ class RiskEstimators:
     
 
     @staticmethod
-    def empirical_covariance(returns, price_data=False, assume_centered=False):
+    def empirical_covariance(returns, price_data=False, assume_centered=False,
+                             nonpositive_semidefinite_fix_method='spectral'):
         """
         Calculates the Maximum likelihood covariance estimator for a dataframe of asset prices or returns.
 
@@ -175,7 +176,24 @@ class RiskEstimators:
         :return: (np.array) Estimated covariance matrix.
         """
 
-        pass
+        if not isinstance(price_data, pd.DataFrame):
+            warnings.warn("data is not in a dataframe", RuntimeWarning)
+            prices = pd.DataFrame(prices)
+
+        assets = prices.columns
+
+        if price_data:
+            X = ReturnsEstimators.calculate_returns(returns)
+        else:
+            X = returns
+            
+        X = X.dropna().values
+        
+        cov_model = EmpiricalCovariance().fit(X)
+        covariance = pd.DataFrame(cov_model.covariance_, index=assets, columns=assets) 
+        return RiskEstimators.fix_nonpositive_semidefinite(covariance, 
+                                                           nonpositive_semidefinite_fix_method)
+    
 
     @staticmethod
     def shrinked_covariance(returns, price_data=False, shrinkage_type='basic', assume_centered=False,
