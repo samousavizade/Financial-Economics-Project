@@ -1,1 +1,1 @@
-# Financial-Economics-Project-1
+# Financial Economics Course Project 1
