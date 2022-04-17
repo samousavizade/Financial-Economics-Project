@@ -64,7 +64,7 @@ class RiskEstimators:
         :return: positive semidefinite covariance matrix
         :rtype: pd.DataFrame
         """
-        
+
         if RiskEstimators._is_positive_semidefinite(matrix):
             return matrix
 
@@ -189,7 +189,8 @@ class RiskEstimators:
 
         assets = returns.columns
 
-        returns = ReturnsEstimators.calculate_returns(returns) if price_data else returns
+        returns = ReturnsEstimators.calculate_returns(
+            returns) if price_data else returns
 
         returns = returns.dropna().values
 
@@ -197,7 +198,8 @@ class RiskEstimators:
             assume_centered=assume_centered).\
             fit(returns)
 
-        covariance = pd.DataFrame(cov_model.covariance_, index=assets, columns=assets)
+        covariance = pd.DataFrame(
+            cov_model.covariance_, index=assets, columns=assets)
 
         return RiskEstimators.fix_nonpositive_semidefinite(covariance,
                                                            nonpositive_semidefinite_fix_method)
@@ -233,32 +235,34 @@ class RiskEstimators:
                                         (0.1 by default)
         :return: (np.array) Estimated covariance matrix. Tuple of covariance matrices if shrinkage_type = ``all``.
         """
-        
+
         if not isinstance(price_data, pd.DataFrame):
             warnings.warn("data is not in a dataframe", RuntimeWarning)
             returns = pd.DataFrame(returns)
 
         assets = returns.columns
 
-        returns = ReturnsEstimators.calculate_returns(returns) if price_data else returns
+        returns = ReturnsEstimators.calculate_returns(
+            returns) if price_data else returns
 
-        if shrinkage_type == 'basic': 
-            cov_model = ShrunkCovariance(assume_centered=assume_centered, 
+        if shrinkage_type == 'basic':
+            cov_model = ShrunkCovariance(assume_centered=assume_centered,
                                          shrinkage=basic_shrinkage).\
                 fit(returns)
-        
+
         elif shrinkage_type == 'lw':
             cov_model = LedoitWolf(assume_centered=assume_centered).\
                 fit(returns)
-                
+
         elif shrinkage_type == 'oas':
             cov_model = OAS(assume_centered=assume_centered).\
                 fit(returns)
-        
-        else: 
-            raise ValueError("Unknown shrinkage type")   
-            
-        covariance = pd.DataFrame(cov_model.covariance_, index=assets, columns=assets)
+
+        else:
+            raise ValueError("Unknown shrinkage type")
+
+        covariance = pd.DataFrame(
+            cov_model.covariance_, index=assets, columns=assets)
 
         return RiskEstimators.fix_nonpositive_semidefinite(covariance,
                                                            nonpositive_semidefinite_fix_method)
@@ -295,19 +299,18 @@ class RiskEstimators:
 
         assets = returns.columns
 
-        returns = ReturnsEstimators.calculate_returns(returns) if price_data else returns
-
+        returns = ReturnsEstimators.calculate_returns(
+            returns) if price_data else returns
 
         drops = np.fmin(returns - threshold_return, 0)
         T = drops.shape[0]
-        
+
         covariance = (drops.T @ drops) / T
-        
+
         covariance = pd.DataFrame(covariance, index=assets, columns=assets)
-        
+
         return RiskEstimators.fix_nonpositive_semidefinite(covariance,
                                                            nonpositive_semidefinite_fix_method)
-
 
     @staticmethod
     def exponential_covariance(returns, price_data=False, window_span=60,
@@ -334,10 +337,11 @@ class RiskEstimators:
 
         assets = returns.columns
 
-        returns = ReturnsEstimators.calculate_returns(returns) if price_data else returns
+        returns = ReturnsEstimators.calculate_returns(
+            returns) if price_data else returns
 
         n = len(assets)
-        
+
         def _pair_exp_cov(X, Y, span=180):
             """
             Calculate the exponential covariance between two timeseries of returns.
@@ -354,24 +358,21 @@ class RiskEstimators:
             covariation = (X - X.mean()) * (Y - Y.mean())
             # Exponentially weight the covariation and take the mean
             if span < 10:
-                warnings.warn("it is recommended to use a higher span, e.g 30 days")
+                warnings.warn(
+                    "it is recommended to use a higher span, e.g 30 days")
             return covariation.ewm(span=span).mean().iloc[-1]
 
-        
         cov_ = np.zeros(shape=(n, n))
         for i in range(n):
             for j in range(n):
                 cov_[i, j] = cov_[j, i] = _pair_exp_cov(
                     returns.iloc[:, i], returns.iloc[:, j], span=window_span
                 )
-                
+
         cov_ = pd.DataFrame(cov_, columns=assets, index=assets)
-        
+
         return RiskEstimators.fix_nonpositive_semidefinite(cov_,
-                                                    nonpositive_semidefinite_fix_method)
-
-
-                
+                                                           nonpositive_semidefinite_fix_method)
 
     @staticmethod
     def filter_corr_hierarchical(cor_matrix, method='complete', draw_plot=False):
@@ -393,24 +394,24 @@ class RiskEstimators:
         :param draw_plot: (bool) Plots the hierarchical cluster tree. (False by default)
         :return: (np.array) The filtered correlation matrix.
         """
-        
+
         # TODO: This function is not tested yet and maybe bad output
-        
+
         if isinstance(cor_matrix, pd.DataFrame):
             cor_matrix = cor_matrix.to_numpy()
             warnings.warn("correlation matrix is a dataframe.", RuntimeWarning)
-            
+
         Z = linkage(cor_matrix, method)
-        
+
         if draw_plot:
             plt.figure(figsize=(16, 8))
             dn = dendrogram(Z)
             plt.show()
-        
+
         pass
-    
-    
+
     # TODO: Covariance estimators Frequency argument??????
+
     def denoise_covariance(self, cov, tn_relation, denoise_method='const_resid_eigen', detone=False,
                            market_component=1, kde_bwidth=0.01, alpha=0):
         """
@@ -483,32 +484,33 @@ class RiskEstimators:
         # TODO: var didnt used???
         e_max, var = self._find_max_eval(
             np.diag(e_values), tn_relation, kde_bwidth)
-        
+
         num_facts = e_values.shape[0] - \
-            np.diag(e_values)[:, :, -1].searchsorted(e_max)
+            np.diag(e_values)[::-1].searchsorted(e_max)
 
         if denoise_method == "const_resid_eigen":
             # missing parameter
             denoised_corr = self._denoised_corr_const_resid_eigen(
-                e_values, 
+                e_values,
                 e_vectors,
                 num_facts)
 
         elif denoise_method == "spectral":
             denoised_corr = self._denoised_corr_spectral(
-                e_values, 
+                e_values,
                 e_vectors,
                 num_facts)
 
         elif denoise_method == "target_shrink":
             denoised_corr = self._denoised_corr_targ_shrink(
-                e_values, 
+                e_values,
                 e_vectors,
                 num_facts,
                 alpha)
 
         else:
-            raise DenoiseMethodNotFound("Denoise method not found!")
+            raise NotImplementedError(
+                "Method {} not implemented".format(denoise_method))
 
         if detone:
             e_values, e_vectors = self._get_pca(corr)
@@ -516,8 +518,7 @@ class RiskEstimators:
             e_values_ = e_values[:market_component, :market_component]
             e_vectors_ = e_vectors[:, :market_component]
 
-            # TODO: dot to @
-            corr_ = np.dot(e_vectors_, e_values_).dot(e_vectors_)
+            corr_ = np.dot(e_vectors_, e_values_).dot(e_vectors_.T)
             detoned_corr = denoised_corr - corr_
 
             return RiskEstimators.corr_to_cov(detoned_corr, std)
@@ -589,15 +590,19 @@ class RiskEstimators:
                                        If None, the unique values of observations are used. (None by default)
         :return: (pd.Series) Series with estimated pdf values in the eval_points.
         """
+        
+        observations = observations.reshape(-1, 1)
 
         if len(observations) == 1:
-            observations = observations.reshape(-1, 1)
-
+            observations = observations.reshape(1, -1)
+            
         kde = KernelDensity(kernel=kde_kernel,
                             bandwidth=kde_bwidth,).fit(observations)
 
         if eval_points is None:
-            eval_points = np.unique(observations).reshape(-1, 1)
+            eval_points = np.unique(observations)
+            
+        eval_points = eval_points.reshape(-1, 1)
 
         log_prob = kde.score_samples(eval_points)
 
@@ -620,17 +625,18 @@ class RiskEstimators:
         :return: (pd.Series) Series of M-P pdf values.
         """
 
-        # tn_relation = T/N
+        # tn_relation = T / N
         q = tn_relation
 
-        e_min, e_max = var * (1 - (1 / q) ** 0.5) ** 2, var * (1 + (1 / q) ** 0.5) ** 2
-        
+        e_min, e_max = var * (1 - (1. / q) ** .5) ** 2, var * (1 + (1. / q) ** .5) ** 2
+
         e_values = np.linspace(e_min, e_max, num_points)
 
-        pdf = q / (2 * np.pi * var * e_values) * ((e_max - e_values) * (e_values - e_min)) ** 0.5
-        
-        pdf = pd.Series(pdf, index=e_values)
-        
+        pdf = q / (2 * np.pi * var * e_values) * \
+            ((e_max - e_values) * (e_values - e_min)) ** 0.5
+
+        pdf = pd.Series(pdf.ravel(), index=e_values.ravel())
+
         return pdf
 
     def _pdf_fit(self, var, eigen_observations, tn_relation, kde_bwidth, num_points=1000):
@@ -648,9 +654,7 @@ class RiskEstimators:
         :param num_points: (int) Number of points to estimate pdf. (for the empirical pdf, 1000 by default)
         :return: (float) SSE between empirical pdf and theoretical pdf.
         """
-
         # 2.4
-
         # theoretical pdf
         pdf_0 = RiskEstimators._mp_pdf(var, tn_relation, num_points)
 
@@ -675,11 +679,17 @@ class RiskEstimators:
         :return: (float, float) Maximum random eigenvalue, optimal variation of the Marcenko-Pastur distribution.
         """
 
+        # out=minimize(lambda *x:errPDFs(*x),.5,args=(eVal,q,bWidth),
+        # bounds=((1E-5,1-1E-5),))
+        # if out[’success’]:var=out[’x’][0]
+        # else:var=1
+        # eMax=var*(1+(1./q)**.5)**2
+        # return eMax,var
+
         out = minimize(lambda *x: self._pdf_fit(*x),
                        0.5,
                        args=(eigen_observations, tn_relation, kde_bwidth),
-                    #    bounds=((1e-5, 1 - 1e-5,))
-                       bounds=((1E-5,1-1E-5),))
+                       bounds=((1E-5, 1-1E-5),))
 
         if out['success']:
             var = out['x'][0]
@@ -734,8 +744,9 @@ class RiskEstimators:
         """
 
         e_values_ = np.diag(eigenvalues).copy()
-        e_values_[num_facts:] = e_values_[
-            num_facts:].sum() / float(e_values_.shape[0] - num_facts)
+        e_values_[num_facts:] = \
+            e_values_[num_facts:].sum() / float(e_values_.shape[0] - num_facts)
+
         e_values_ = np.diag(e_values_)
 
         # TODO: use @ instead of .dot method
